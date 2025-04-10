@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Attendance Records</title>
+    <style>
+        table {
+            width: 80%;
+            margin: 20px auto;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid black;
+            padding: 10px;
+            text-align: center;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+    </style>
+</head>
+<body>
+    <h2 style="text-align:center;">Attendance Records</h2>
+    <table>
+        <tr>
+            <th>S.No</th>
+            <th>Name</th>
+            <th>Date</th>
+            <th>Login & Logout</th>
+            <th>Total Hours</th>
+        </tr>
+        {% for row in attendance %}
+        <tr>
+            <td>{{ row[0] }}</td>  <!-- S.No -->
+            <td>{{ row[1] }}</td>  <!-- Name -->
+            <td>{{ row[2] }}</td>  <!-- Date -->
+            <td>{{ row[3] }}</td>  <!-- Login & Logout -->
+            <td>{{ row[4] }}</td>  <!-- Total Hours -->
+        </tr>
+        {% endfor %}
+    </table>
+</body>  
+</html>
