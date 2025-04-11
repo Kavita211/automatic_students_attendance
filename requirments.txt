@@ -3,3 +3,4 @@ opencv-python
 numpy
 face-recognition
 pillow
+sqlite3 
