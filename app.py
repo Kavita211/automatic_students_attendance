@@ -54,3 +54,8 @@ def index():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
+
+import os
+
+DB_PATH = os.environ.get("DB_PATH", "/home/pi/attendance_system/attendance.db")  # fallback for local dev
+
