@@ -71,8 +71,13 @@ def index():
     print("[DEBUG] Attendance Data:", records)  # Debug print
     return render_template('attendance.html', attendance=records)
 
-if __name__ == '__main__':
+#if __name__ == '__main__':
    # app.run(host="0.0.0.0", port=5000, ssl_context=('/home/pi/ssl/attendpi.crt', '/home/pi/ssl/attendpi.key'))
    #app.run(host="0.0.0.0", port=5000, debug=True)
-   app.run(host="0.0.0.0", port=5000)
+   #app.run(host="0.0.0.0", port=5000)
+import os
+
+port = int(os.environ.get("PORT", 5000))
+app.run(host='0.0.0.0', port=port)
+
 
