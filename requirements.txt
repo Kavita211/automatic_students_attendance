@@ -32,7 +32,6 @@ distro==1.8.0
 dlib==19.24.99
 et-xmlfile==1.0.1
 face-recognition==1.3.0
-face-recognition-models @ file:///home/pi/face_recognition_models-0.3.0-py2.py3-none-any.whl
 Flask==2.2.2
 fonttools==4.38.0
 fs==2.4.16
