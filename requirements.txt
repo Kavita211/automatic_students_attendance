@@ -60,7 +60,7 @@ packaging==23.0
 pandas==1.5.3
 pigpio==1.78
 Pillow==9.4.0
-pluggy==1.0.0+repack
+pluggy
 py==1.11.0
 pycairo==1.20.1
 pycryptodomex==3.11.0
