@@ -32,7 +32,7 @@ distro==1.8.0
 dlib==19.24.6
 et-xmlfile==1.0.1
 face-recognition==1.3.0
-Flask==2.2.2
+flask==2.2.2
 fonttools==4.38.0
 fs==2.4.16
 gpiozero==2.0.1
@@ -93,8 +93,12 @@ sysv-ipc==1.1.0
 tables==3.7.0
 toml==0.10.2
 typing_extensions==4.12.2
-ufoLib2==0.14.0
+ufoLib2==0.14.0source 
 unicodedata2==15.0.0
 urllib3==1.26.12
 webencodings==0.5.1
 Werkzeug==2.2.2
+
+Flask==2.3.2
+gunicorn==21.2.0
+requests==2.31.0
