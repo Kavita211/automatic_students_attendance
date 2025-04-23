@@ -6,6 +6,7 @@ import datetime
 import gc
 import smbus
 import time
+import threading
 
 # ✅ I2C LCD Setup
 I2C_ADDR = 0x27
@@ -113,50 +114,75 @@ def handle_unknown_user():
     lcd_display("Enter Details", LCD_LINE_2)
     time.sleep(3)
 
-try:
-    while True:
-        ret, frame = video_capture.read()
-        if not ret:
-            lcd_display("Camera Error!", LCD_LINE_1)
-            print("[ERROR] Failed to grab frame from webcam.")
-            break
+# ✅ Face detection thread
+def detect_faces():
+    try:
+        while True:
+            ret, frame = video_capture.read()
+            if not ret:
+                lcd_display("Camera Error!", LCD_LINE_1)
+                print("[ERROR] Failed to grab frame from webcam.")
+                break
 
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        face_locations = face_recognition.face_locations(rgb_frame)
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            face_locations = face_recognition.face_locations(rgb_frame)
 
-        lcd_display(f"Faces: {len(face_locations)}", LCD_LINE_1)
-        lcd_display("Scanning...", LCD_LINE_2)
+            lcd_display(f"Faces: {len(face_locations)}", LCD_LINE_1)
+            lcd_display("Scanning...", LCD_LINE_2)
 
-        for face_location in face_locations:
-            encodings = face_recognition.face_encodings(rgb_frame, [face_location])
-            if encodings:
-                face_encoding = encodings[0]
-                matches = face_recognition.compare_faces(known_face_encodings, face_encoding, tolerance=TOLERANCE)
+            for face_location in face_locations:
+                encodings = face_recognition.face_encodings(rgb_frame, [face_location])
+                if encodings:
+                    face_encoding = encodings[0]
+                    matches = face_recognition.compare_faces(known_face_encodings, face_encoding, tolerance=TOLERANCE)
 
-                if any(matches):
-                    face_distances = face_recognition.face_distance(known_face_encodings, face_encoding)
-                    best_match_index = min(range(len(face_distances)), key=lambda i: face_distances[i])
-                    
-                    if matches[best_match_index]:
-                        name = known_face_names[best_match_index]
-                        update_attendance(name)
-                        lcd_display(f"Name: {name}", LCD_LINE_1)
-                        lcd_display("Attendance Marked", LCD_LINE_2)
-                        print(f"[INFO] {name} - Attendance marked.")
+                    if any(matches):
+                        face_distances = face_recognition.face_distance(known_face_encodings, face_encoding)
+                        best_match_index = min(range(len(face_distances)), key=lambda i: face_distances[i])
+                        
+                        if matches[best_match_index]:
+                            name = known_face_names[best_match_index]
+                            update_attendance(name)
+                            lcd_display(f"Name: {name}", LCD_LINE_1)
+                            lcd_display("Attendance Marked", LCD_LINE_2)
+                            print(f"[INFO] {name} - Attendance marked.")
+                        else:
+                            handle_unknown_user()
                     else:
                         handle_unknown_user()
-                else:
-                    handle_unknown_user()
 
-            time.sleep(2)  # Prevents duplicate detection in short intervals
+                time.sleep(2)  # Prevents duplicate detection in short intervals
 
-        gc.collect()
-        cv2.waitKey(1)  # Allows OpenCV to process events properly
+            gc.collect()
+            cv2.waitKey(1)  # Allows OpenCV to process events properly
 
+    except KeyboardInterrupt:
+        print("\n[INFO] System shutdown successfully.")
+
+# ✅ Attendance update thread
+def update_attendance_loop():
+    try:
+        while True:
+            # Here you can add functionality to periodically check for new attendance data, upload it to a server, or perform any other tasks
+            time.sleep(5)
+            # For example: Upload attendance data to server
+
+    except KeyboardInterrupt:
+        print("\n[INFO] Attendance update loop shutdown.")
+
+# ✅ Run face detection and attendance update in parallel using threads
+face_thread = threading.Thread(target=detect_faces)
+attendance_thread = threading.Thread(target=update_attendance_loop)
+
+face_thread.start()
+attendance_thread.start()
+
+# ✅ Main program termination handling
+try:
+    while True:
+        time.sleep(1)  # Main thread keeps running
 except KeyboardInterrupt:
-    print("\n[INFO] System shutdown successfully.")
-
-finally:
+    print("\n[INFO] Main program shutdown.")
     video_capture.release()
     conn.close()
     lcd_display("System Off", LCD_LINE_1)

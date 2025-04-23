@@ -5,11 +5,16 @@ from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
-DB_PATH = "/home/pi/attendance_system/attendance.db"
-BACKUP_PATH = "/home/pi/attendance_system/backup"
+# Use environment variable if set, fallback to local Raspberry Pi path
+DB_PATH = os.environ.get("DB_PATH", os.path.join(os.getcwd(), "attendance.db"))
+
+# Store backups inside the current working directory (safe for cloud deployment)
+BACKUP_PATH = os.path.join(os.getcwd(), "attendance_backup")
 os.makedirs(BACKUP_PATH, exist_ok=True)
 
 print("[INFO] Auto face detection is DISABLED.")
+print(f"[INFO] Using database at: {DB_PATH}")
+print(f"[INFO] Backup path set to: {BACKUP_PATH}")
 
 def fetch_attendance():
     conn = sqlite3.connect(DB_PATH)
@@ -54,8 +59,3 @@ def index():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
-
-import os
-
-DB_PATH = os.environ.get("DB_PATH", "/home/pi/attendance_system/attendance.db")  # fallback for local dev
-
