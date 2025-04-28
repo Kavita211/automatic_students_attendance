@@ -1,7 +1,7 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, abort
 import sqlite3
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
@@ -14,14 +14,35 @@ print("[INFO] Starting Flask Attendance Server...")
 print(f"[INFO] Database Path: {DB_PATH}")
 print(f"[INFO] Backup Directory: {BACKUP_PATH}")
 
-# 🔎 Fetch attendance records from DB
+# ✅ Ensure attendance table exists
+def initialize_db():
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS attendance (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    day TEXT NOT NULL,
+                    login_logout TEXT DEFAULT 'No Record',
+                    total_hours TEXT DEFAULT '00:00:00'
+                )
+            ''')
+            conn.commit()
+        print("[INFO] Database initialized successfully.")
+    except Exception as e:
+        print(f"[ERROR] Database initialization failed: {e}")
+        raise
+
+initialize_db()
+
+# 🔎 Fetch attendance records
 def fetch_attendance():
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT name, day, login_logout, total_hours FROM attendance ORDER BY day DESC, name ASC")
-        records = cursor.fetchall()
-        conn.close()
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT name, day, login_logout, total_hours FROM attendance ORDER BY day DESC, name ASC")
+            records = cursor.fetchall()
 
         formatted_records = []
         for i, (name, day, log_times, total_hours) in enumerate(records, start=1):
@@ -43,46 +64,80 @@ def fetch_attendance():
 @app.route('/')
 def index():
     records = fetch_attendance()
-    print("[DEBUG] Attendance Records Retrieved:", len(records))
+    print(f"[DEBUG] {len(records)} attendance records retrieved.")
     return render_template('attendance.html', attendance=records)
 
-# 🔁 Raspberry Pi calls this to push data
+# 🔁 Raspberry Pi (or any device) calls this to push data
 @app.route('/upload', methods=['POST'])
 def upload_attendance():
     try:
-        data = request.get_json()
+        data = request.get_json(force=True)
+
+        if not data:
+            abort(400, description="No data provided")
 
         name = data.get('name')
-        date = data.get('date')
-        login_logout = data.get('login_logout')
-        total_hours = data.get('total_hours')
+        timestamp = data.get('timestamp')
 
-        if not all([name, date, login_logout, total_hours]):
-            return jsonify({'error': 'Missing fields'}), 400
+        if not all([name, timestamp]):
+            abort(400, description="Missing fields")
 
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
+        try:
+            dt_obj = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            abort(400, description="Invalid timestamp format. Expected: YYYY-MM-DD HH:MM:SS")
 
-        # Upsert logic: insert or update based on name+day
-        cursor.execute('''
-            INSERT INTO attendance (name, day, login_logout, total_hours)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(name, day) DO UPDATE SET
-                login_logout = excluded.login_logout,
-                total_hours = excluded.total_hours
-        ''', (name, date, login_logout, total_hours))
+        date = dt_obj.strftime("%Y-%m-%d")
+        current_time = dt_obj.strftime("%H:%M:%S")
 
-        conn.commit()
-        conn.close()
-        print(f"[INFO] Updated attendance for: {name} on {date}")
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
 
+            # Check if record exists
+            cursor.execute("SELECT login_logout FROM attendance WHERE name = ? AND day = ?", (name, date))
+            result = cursor.fetchone()
+
+            if result:
+                previous_times = result[0]
+                time_list = previous_times.split(", ") if previous_times.lower() != "no record" else []
+                time_list.append(current_time)
+
+                # Calculate total worked hours
+                total_seconds = 0
+                for i in range(0, len(time_list) - 1, 2):
+                    try:
+                        t1 = datetime.strptime(time_list[i], "%H:%M:%S")
+                        t2 = datetime.strptime(time_list[i+1], "%H:%M:%S")
+                        total_seconds += (t2 - t1).seconds
+                    except Exception as e:
+                        print(f"[WARN] Incomplete pair found: {e}")
+                        continue
+
+                total_hours = str(timedelta(seconds=total_seconds))
+                updated_login_logout = ", ".join(time_list)
+
+                cursor.execute('''
+                    UPDATE attendance 
+                    SET login_logout = ?, total_hours = ?
+                    WHERE name = ? AND day = ?
+                ''', (updated_login_logout, total_hours, name, date))
+            else:
+                # First-time entry
+                cursor.execute('''
+                    INSERT INTO attendance (name, day, login_logout, total_hours)
+                    VALUES (?, ?, ?, ?)
+                ''', (name, date, current_time, "00:00:00"))
+
+            conn.commit()
+
+        print(f"[INFO] Attendance updated for {name} on {date}")
         return jsonify({'status': 'success'}), 200
 
     except Exception as e:
         print(f"[ERROR] Upload failed: {e}")
-        return jsonify({'error': 'Internal Server Error'}), 500
+        return jsonify({'error': str(e)}), 500
 
 # ✅ Start the app
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port, debug=True)
