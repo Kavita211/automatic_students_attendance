@@ -56,7 +56,7 @@ def lcd_display(message, line):
 lcd_init()
 lcd_display("Starting...", LCD_LINE_1)
 lcd_display("System Ready!", LCD_LINE_2)
-time.sleep(2)
+time.sleep(0.01)
 
 # ✅ Initialize webcam
 video_capture = cv2.VideoCapture(0)
@@ -197,7 +197,7 @@ def detect_faces():
                     print("[DEBUG] No encodings found for face.")
 
             # Sleep between frames to avoid high CPU usage
-            time.sleep(2)
+            time.sleep(0.01)
 
             # Clear garbage
             gc.collect()
