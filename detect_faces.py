@@ -1,4 +1,3 @@
-import sqlite3
 import cv2
 import face_recognition
 import pickle
@@ -10,6 +9,7 @@ import threading
 import requests
 import re
 from queue import Queue
+import sqlite3
 
 # ✅ Server URL
 PUBLIC_SERVER_URL = "https://automatic-attendance-17.onrender.com/upload"
@@ -134,10 +134,10 @@ def db_writer():
 
             if result:
                 timestamps = [ts.strip() for ts in result[0].split(",") if ts.strip()]
-                if timestamps and timestamps[-1].startswith("Login"):
-                    timestamps.append(f"Logout: {current_time}")
-                else:
+                if not timestamps or timestamps[-1].startswith("Logout"):
                     timestamps.append(f"Login: {current_time}")
+                else:
+                    timestamps.append(f"Logout: {current_time}")
 
                 total_seconds = 0
                 for i in range(0, len(timestamps) - 1, 2):
@@ -213,7 +213,6 @@ def detect_faces():
                 if best_match_index is not None and face_distances[best_match_index] < TOLERANCE:
                     name = known_face_names[best_match_index]
 
-                    # ✅ Prevent repeated marking within short time
                     now = time.time()
                     if name not in last_seen or now - last_seen[name] > 10:
                         last_seen[name] = now
