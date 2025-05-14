@@ -19,3 +19,4 @@ conn.commit()
 conn.close()
 
 print("[INFO] Students table created successfully.")
+

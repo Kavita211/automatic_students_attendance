@@ -14,7 +14,7 @@ print("[INFO] Starting Flask Attendance Server...")
 print(f"[INFO] Database Path: {DB_PATH}")
 print(f"[INFO] Backup Directory: {BACKUP_PATH}")
 
-# ✅ Ensure attendance table exists
+# ✅ Create table if not exists
 def initialize_db():
     try:
         with sqlite3.connect(DB_PATH) as conn:
@@ -36,7 +36,7 @@ def initialize_db():
 
 initialize_db()
 
-# 🔎 Fetch attendance records
+# 🔎 Fetch and format attendance
 def fetch_attendance():
     try:
         with sqlite3.connect(DB_PATH) as conn:
@@ -60,14 +60,14 @@ def fetch_attendance():
         print(f"[ERROR] Failed to fetch attendance: {e}")
         return []
 
-# 🌐 Homepage - Show attendance
+# 🌐 Home page
 @app.route('/')
 def index():
     records = fetch_attendance()
     print(f"[DEBUG] {len(records)} attendance records retrieved.")
     return render_template('attendance.html', attendance=records)
 
-# 🔁 Raspberry Pi (or any device) calls this to push data
+# 🔁 Upload attendance
 @app.route('/upload', methods=['POST'])
 def upload_attendance():
     try:
@@ -93,7 +93,7 @@ def upload_attendance():
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
 
-            # Check if record exists
+            # Check if entry exists for the same day
             cursor.execute("SELECT login_logout FROM attendance WHERE name = ? AND day = ?", (name, date))
             result = cursor.fetchone()
 
@@ -102,12 +102,12 @@ def upload_attendance():
                 time_list = previous_times.split(", ") if previous_times.lower() != "no record" else []
                 time_list.append(current_time)
 
-                # Calculate total worked hours
+                # Calculate total hours
                 total_seconds = 0
                 for i in range(0, len(time_list) - 1, 2):
                     try:
                         t1 = datetime.strptime(time_list[i], "%H:%M:%S")
-                        t2 = datetime.strptime(time_list[i+1], "%H:%M:%S")
+                        t2 = datetime.strptime(time_list[i + 1], "%H:%M:%S")
                         total_seconds += (t2 - t1).seconds
                     except Exception as e:
                         print(f"[WARN] Incomplete pair found: {e}")
@@ -122,7 +122,7 @@ def upload_attendance():
                     WHERE name = ? AND day = ?
                 ''', (updated_login_logout, total_hours, name, date))
             else:
-                # First-time entry
+                # First entry of the day
                 cursor.execute('''
                     INSERT INTO attendance (name, day, login_logout, total_hours)
                     VALUES (?, ?, ?, ?)
@@ -137,7 +137,7 @@ def upload_attendance():
         print(f"[ERROR] Upload failed: {e}")
         return jsonify({'error': str(e)}), 500
 
-# ✅ Start the app
+# ✅ Start server
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
