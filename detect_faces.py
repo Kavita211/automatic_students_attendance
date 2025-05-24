@@ -188,6 +188,7 @@ def detect_faces():
         while True:
             ret, frame = video_capture.read()
             if not ret:
+                #print("camera error");
                 lcd_display("Camera Error!", LCD_LINE_1)
                 break
 
