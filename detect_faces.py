@@ -1,4 +1,5 @@
-import sqlite3
+# FILE: detect_faces.py
+
 import cv2
 import face_recognition
 import pickle
@@ -8,14 +9,15 @@ import smbus
 import time
 import threading
 import requests
+import sqlite3
+from queue import Queue
 
-# ✅ Your Render public server URL
+# ✅ Server URL
 PUBLIC_SERVER_URL = "https://automatic-attendance-17.onrender.com/upload"
 
 # ✅ I2C LCD Setup
 I2C_ADDR = 0x27
 bus = smbus.SMBus(1)
-
 LCD_WIDTH = 16
 LCD_LINE_1 = 0x80
 LCD_LINE_2 = 0xC0
@@ -32,12 +34,12 @@ def lcd_init():
     time.sleep(0.0005)
 
 def lcd_send_byte(bits, mode):
-    high_bits = mode | (bits & 0xF0) | LCD_BACKLIGHT
-    low_bits = mode | ((bits << 4) & 0xF0) | LCD_BACKLIGHT
-    bus.write_byte(I2C_ADDR, high_bits)
-    lcd_toggle_enable(high_bits)
-    bus.write_byte(I2C_ADDR, low_bits)
-    lcd_toggle_enable(low_bits)
+    high = mode | (bits & 0xF0) | LCD_BACKLIGHT
+    low = mode | ((bits << 4) & 0xF0) | LCD_BACKLIGHT
+    bus.write_byte(I2C_ADDR, high)
+    lcd_toggle_enable(high)
+    bus.write_byte(I2C_ADDR, low)
+    lcd_toggle_enable(low)
 
 def lcd_toggle_enable(bits):
     time.sleep(0.0005)
@@ -52,161 +54,186 @@ def lcd_display(message, line):
     for char in message:
         lcd_send_byte(ord(char), 1)
 
-# ✅ Initialize LCD
+# ✅ Startup LCD
 lcd_init()
 lcd_display("Starting...", LCD_LINE_1)
 lcd_display("System Ready!", LCD_LINE_2)
-time.sleep(.2)
+time.sleep(1)
 
-# ✅ Initialize webcam
+# ✅ Camera Setup
 video_capture = cv2.VideoCapture(0)
 if not video_capture.isOpened():
     lcd_display("Cam Error!", LCD_LINE_1)
-    print("[ERROR] Unable to access webcam.")
+    print("[ERROR] Webcam access failed.")
     exit()
 
-gc.enable()
-
-# ✅ Connect to SQLite database
-db_path = "/home/pi/attendance_system/attendance.db"
-conn = sqlite3.connect(db_path, check_same_thread=False)
-cursor = conn.cursor()
-
-# ✅ Load known face encodings
+# ✅ Load Encodings
 with open("/home/pi/attendance_system/encodings.pickle", "rb") as f:
     data = pickle.load(f)
     known_face_encodings = data["encodings"]
     known_face_names = data["names"]
 
-# ✅ Set a stricter tolerance for better accuracy
-TOLERANCE = 0.6
+# ✅ Constants
+TOLERANCE = 0.55
+attendance_queue = Queue()
+last_seen = {}
+db_path = "/home/pi/attendance_system/attendance.db"
+gc.enable()
 
 def update_attendance(name):
-    current_date = datetime.date.today().strftime("%Y-%m-%d")
-    current_time = datetime.datetime.now().strftime("%H:%M:%S")
-    
-    cursor.execute("SELECT login_logout FROM attendance WHERE name = ? AND day = ?", (name, current_date))
-    existing_entry = cursor.fetchone()
+    attendance_queue.put(name)
 
-    if existing_entry:
-        timestamps = existing_entry[0].split(", ")
-        timestamps.append(current_time)
-
-        total_seconds = 0
-        for i in range(0, len(timestamps) - 1, 2):
-            login_time = datetime.datetime.strptime(timestamps[i], "%H:%M:%S")
-            logout_time = datetime.datetime.strptime(timestamps[i+1], "%H:%M:%S")
-            total_seconds += (logout_time - login_time).seconds
-        
-        total_hours = str(datetime.timedelta(seconds=total_seconds))
-        new_login_logout = ", ".join(timestamps)
-
-        cursor.execute("UPDATE attendance SET login_logout = ?, total_hours = ? WHERE name = ? AND day = ?", 
-                       (new_login_logout, total_hours, name, current_date))
-    else:
-        new_login_logout = current_time
-        total_hours = "00:00:00"
-        cursor.execute("INSERT INTO attendance (name, day, login_logout, total_hours) VALUES (?, ?, ?, ?)", 
-                       (name, current_date, new_login_logout, total_hours))
-    
-    conn.commit()
-
-    # ✅ After updating DB, push real updated data to server
-    payload = {
-        "name": name,
-        "day": current_date,
-        "login_logout": new_login_logout,
-        "total_hours": total_hours
-    }
-
-    try:
-        print(f"[DEBUG] Sending payload: {payload}")
-        response = requests.post(PUBLIC_SERVER_URL, json=payload)
-
-        if response.status_code == 200:
-            print(f"[INFO] {name} - Attendance marked and sent to server.")
-        else:
-            print(f"[ERROR] Server error: {response.status_code} - {response.text}")
-    except Exception as e:
-        print(f"[ERROR] Could not send data to server: {e}")
-
-def handle_unknown_user():
+def handle_unknown():
     lcd_display("New User", LCD_LINE_1)
     lcd_display("Enter Details", LCD_LINE_2)
-    time.sleep(.3)
+    time.sleep(2)
 
-# ✅ Face detection thread
-def detect_faces():
+def db_writer():
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    cursor = conn.cursor()
+
+    # ✅ Backup yesterday's data
     try:
-        while True:
-            ret, frame = video_capture.read()
-            if not ret:
-                lcd_display("Camera Error!", LCD_LINE_1)
-                print("[ERROR] Failed to grab frame from webcam.")
-                break
+        yesterday = (datetime.datetime.now() - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+        cursor.execute("SELECT * FROM attendance WHERE day = ?", (yesterday,))
+        for row in cursor.fetchall():
+            payload = {
+                "name": row[1],
+                "day": row[2],
+                "login_logout": row[3],
+                "total_hours": row[4]
+            }
+            try:
+                response = requests.post(PUBLIC_SERVER_URL, json=payload, timeout=10)
+                if response.status_code == 200:
+                    print(f"[BACKUP SYNCED] {row[1]} - {row[2]}")
+            except Exception as e:
+                print(f"[SYNC ERROR] {e}")
+        cursor.execute("DELETE FROM attendance WHERE day = ?", (yesterday,))
+        conn.commit()
+    except Exception as e:
+        print(f"[ERROR] During backup: {e}")
 
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            face_locations = face_recognition.face_locations(rgb_frame)
+    # ✅ Real-time attendance processing
+    while True:
+        name = attendance_queue.get()
+        if name is None:
+            break
 
-            if len(face_locations) == 0:
-                lcd_display("No Face Found", LCD_LINE_1)
-                lcd_display("Waiting...", LCD_LINE_2)
+        try:
+            today = datetime.date.today().strftime("%Y-%m-%d")
+            now = datetime.datetime.now().strftime("%H:%M:%S")
+
+            cursor.execute("SELECT login_logout FROM attendance WHERE name = ? AND day = ?", (name, today))
+            result = cursor.fetchone()
+
+            if result:
+                logs = result[0].split(", ")
+                login_time = None
+                logout_time = now  # Latest time is treated as logout
+                for entry in logs:
+                    if entry.startswith("Login:"):
+                        login_time = entry.split("Login: ")[-1]
+                        break
+
+                if not login_time:
+                    login_time = now
+
+                login_logout = f"Login: {login_time}, Logout: {logout_time}"
+
+                # Calculate total duration
+                t1 = datetime.datetime.strptime(login_time, "%H:%M:%S")
+                t2 = datetime.datetime.strptime(logout_time, "%H:%M:%S")
+                total_seconds = (t2 - t1).seconds
+                total_hours = str(datetime.timedelta(seconds=total_seconds))
+
+                cursor.execute("""
+                    UPDATE attendance SET login_logout = ?, total_hours = ? WHERE name = ? AND day = ?
+                """, (login_logout, total_hours, name, today))
             else:
-                lcd_display(f"Faces: {len(face_locations)}", LCD_LINE_1)
-                lcd_display("Scanning...", LCD_LINE_2)
+                login_logout = f"Login: {now}"
+                total_hours = "00:00:00"
+                cursor.execute("""
+                    INSERT INTO attendance (name, day, login_logout, total_hours)
+                    VALUES (?, ?, ?, ?)
+                """, (name, today, login_logout, total_hours))
 
-            for face_location in face_locations:
-                encodings = face_recognition.face_encodings(rgb_frame, [face_location])
-                if encodings:
-                    face_encoding = encodings[0]
-                    matches = face_recognition.compare_faces(known_face_encodings, face_encoding, tolerance=TOLERANCE)
+            conn.commit()
 
-                    if any(matches):
-                        face_distances = face_recognition.face_distance(known_face_encodings, face_encoding)
-                        best_match_index = min(range(len(face_distances)), key=lambda i: face_distances[i])
+            # ✅ Sync this data
+            payload = {
+                "name": name,
+                "day": today,
+                "login_logout": login_logout,
+                "total_hours": total_hours
+            }
+            try:
+                response = requests.post(PUBLIC_SERVER_URL, json=payload, timeout=10)
+                if response.status_code == 200:
+                    print(f"[SYNCED] {name}")
+            except Exception as e:
+                print(f"[SYNC FAIL] {e}")
+        except Exception as e:
+            print(f"[DB ERROR] {e}")
 
-                        if matches[best_match_index]:
-                            name = known_face_names[best_match_index]
-                            update_attendance(name)
-                            lcd_display(f"Name: {name}", LCD_LINE_1)
-                            lcd_display("Attendance Marked", LCD_LINE_2)
-                            print(f"[INFO] {name} - Attendance marked.")
-                        else:
-                            handle_unknown_user()
-                    else:
-                        handle_unknown_user()
+    conn.close()
 
-                time.sleep(.2)
+def detect_faces():
+    while True:
+        ret, frame = video_capture.read()
+        if not ret:
+            lcd_display("Camera Error", LCD_LINE_1)
+            break
 
-            gc.collect()
-            cv2.waitKey(1)
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        locations = face_recognition.face_locations(rgb)
 
-    except KeyboardInterrupt:
-        print("\n[INFO] System shutdown successfully.")
+        if not locations:
+            lcd_display("No Face Found", LCD_LINE_1)
+            lcd_display("Waiting...", LCD_LINE_2)
+        else:
+            lcd_display(f"Faces: {len(locations)}", LCD_LINE_1)
+            lcd_display("Scanning...", LCD_LINE_2)
 
-# ✅ Dummy attendance update thread (for future background tasks if needed)
-def update_attendance_loop():
-    try:
-        while True:
-            time.sleep(5)
-    except KeyboardInterrupt:
-        print("\n[INFO] Attendance update loop shutdown.")
+        for location in locations:
+            encoding = face_recognition.face_encodings(rgb, [location])
+            if not encoding:
+                continue
 
-# ✅ Run face detection and attendance update in parallel
+            face_encoding = encoding[0]
+            distances = face_recognition.face_distance(known_face_encodings, face_encoding)
+            best_match = distances.argmin()
+
+            if best_match is not None and distances[best_match] < TOLERANCE:
+                name = known_face_names[best_match]
+                now = time.time()
+                if name not in last_seen or now - last_seen[name] > 10:
+                    last_seen[name] = now
+                    lcd_display(f"Name: {name}", LCD_LINE_1)
+                    lcd_display("Marked ✅", LCD_LINE_2)
+                    print(f"[MATCH] {name}")
+                    update_attendance(name)
+            else:
+                handle_unknown()
+
+        time.sleep(0.1)
+        gc.collect()
+        cv2.waitKey(1)
+
+# ✅ Start Threads
+db_thread = threading.Thread(target=db_writer)
 face_thread = threading.Thread(target=detect_faces)
-attendance_thread = threading.Thread(target=update_attendance_loop)
 
+db_thread.start()
 face_thread.start()
-attendance_thread.start()
 
-# ✅ Main thread keep alive
 try:
     while True:
         time.sleep(1)
 except KeyboardInterrupt:
-    print("\n[INFO] Main program shutdown.")
+    attendance_queue.put(None)
+    db_thread.join()
     video_capture.release()
-    conn.close()
     lcd_display("System Off", LCD_LINE_1)
     lcd_display("Goodbye!", LCD_LINE_2)
-    print("[INFO] Cleanup complete.") 
+    print("[INFO] System exited.")

@@ -5,16 +5,20 @@ from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
-# 🛠️ Configuration
-DB_PATH = os.environ.get("DB_PATH", os.path.join(os.getcwd(), "attendance.db"))
-BACKUP_PATH = os.path.join(os.getcwd(), "attendance_backup")
+# ✅ Fixed database path
+DB_PATH = "/home/pi/attendance_system/attendance.db"
+BACKUP_PATH = "/home/pi/attendance_system/attendance_backup"
 os.makedirs(BACKUP_PATH, exist_ok=True)
 
 print("[INFO] Starting Flask Attendance Server...")
 print(f"[INFO] Database Path: {DB_PATH}")
 print(f"[INFO] Backup Directory: {BACKUP_PATH}")
 
-# ✅ Create table if not exists
+
+print("[INFO] Starting Flask Attendance Server...")
+print(f"[INFO] Database Path: {DB_PATH}")
+print(f"[INFO] Backup Directory: {BACKUP_PATH}")
+
 def initialize_db():
     try:
         with sqlite3.connect(DB_PATH) as conn:
@@ -36,7 +40,6 @@ def initialize_db():
 
 initialize_db()
 
-# 🔎 Fetch and format attendance
 def fetch_attendance():
     try:
         with sqlite3.connect(DB_PATH) as conn:
@@ -60,18 +63,24 @@ def fetch_attendance():
         print(f"[ERROR] Failed to fetch attendance: {e}")
         return []
 
-# 🌐 Home page
+# Disable caching on all responses (to ensure fresh data)
+@app.after_request
+def add_header(response):
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    return response
+
 @app.route('/')
 def index():
     records = fetch_attendance()
     print(f"[DEBUG] {len(records)} attendance records retrieved.")
     return render_template('attendance.html', attendance=records)
 
-# 🔁 Upload attendance
 @app.route('/upload', methods=['POST'])
 def upload_attendance():
     try:
+        print("[DEBUG] /upload endpoint called")
         data = request.get_json(force=True)
+        print(f"[DEBUG] Received data: {data}")
 
         if not data:
             abort(400, description="No data provided")
@@ -92,7 +101,6 @@ def upload_attendance():
 
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
-
             # Check if entry exists for the same day
             cursor.execute("SELECT login_logout FROM attendance WHERE name = ? AND day = ?", (name, date))
             result = cursor.fetchone()
@@ -121,23 +129,24 @@ def upload_attendance():
                     SET login_logout = ?, total_hours = ?
                     WHERE name = ? AND day = ?
                 ''', (updated_login_logout, total_hours, name, date))
+                print(f"[DEBUG] Updated attendance for {name} on {date}: {updated_login_logout}, {total_hours}")
             else:
                 # First entry of the day
                 cursor.execute('''
                     INSERT INTO attendance (name, day, login_logout, total_hours)
                     VALUES (?, ?, ?, ?)
                 ''', (name, date, current_time, "00:00:00"))
+                print(f"[DEBUG] Inserted new attendance for {name} on {date}: {current_time}")
 
             conn.commit()
+            print("[DEBUG] DB changes committed")
 
-        print(f"[INFO] Attendance updated for {name} on {date}")
         return jsonify({'status': 'success'}), 200
 
     except Exception as e:
         print(f"[ERROR] Upload failed: {e}")
         return jsonify({'error': str(e)}), 500
 
-# ✅ Start server
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
