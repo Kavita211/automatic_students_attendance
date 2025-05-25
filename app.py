@@ -1,24 +1,20 @@
-from flask import Flask, render_template, request, jsonify, abort
+from flask import Flask, render_template, request, jsonify, abort 
 import sqlite3
 import os
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
-# ✅ Fixed database path
-DB_PATH = "/home/pi/attendance_system/attendance.db"
-BACKUP_PATH = "/home/pi/attendance_system/attendance_backup"
+# 🛠️ Configuration
+DB_PATH = os.environ.get("DB_PATH", os.path.join(os.getcwd(), "attendance.db"))
+BACKUP_PATH = os.path.join(os.getcwd(), "attendance_backup")
 os.makedirs(BACKUP_PATH, exist_ok=True)
 
 print("[INFO] Starting Flask Attendance Server...")
 print(f"[INFO] Database Path: {DB_PATH}")
 print(f"[INFO] Backup Directory: {BACKUP_PATH}")
 
-
-print("[INFO] Starting Flask Attendance Server...")
-print(f"[INFO] Database Path: {DB_PATH}")
-print(f"[INFO] Backup Directory: {BACKUP_PATH}")
-
+# ✅ Ensure attendance table exists
 def initialize_db():
     try:
         with sqlite3.connect(DB_PATH) as conn:
@@ -40,6 +36,7 @@ def initialize_db():
 
 initialize_db()
 
+# 🔎 Fetch attendance records
 def fetch_attendance():
     try:
         with sqlite3.connect(DB_PATH) as conn:
@@ -63,24 +60,18 @@ def fetch_attendance():
         print(f"[ERROR] Failed to fetch attendance: {e}")
         return []
 
-# Disable caching on all responses (to ensure fresh data)
-@app.after_request
-def add_header(response):
-    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-    return response
-
+# 🌐 Homepage - Show attendance
 @app.route('/')
 def index():
     records = fetch_attendance()
     print(f"[DEBUG] {len(records)} attendance records retrieved.")
     return render_template('attendance.html', attendance=records)
 
+# 🔁 Raspberry Pi (or any device) calls this to push data
 @app.route('/upload', methods=['POST'])
 def upload_attendance():
     try:
-        print("[DEBUG] /upload endpoint called")
         data = request.get_json(force=True)
-        print(f"[DEBUG] Received data: {data}")
 
         if not data:
             abort(400, description="No data provided")
@@ -101,7 +92,8 @@ def upload_attendance():
 
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
-            # Check if entry exists for the same day
+
+            # Check if record exists
             cursor.execute("SELECT login_logout FROM attendance WHERE name = ? AND day = ?", (name, date))
             result = cursor.fetchone()
 
@@ -110,12 +102,12 @@ def upload_attendance():
                 time_list = previous_times.split(", ") if previous_times.lower() != "no record" else []
                 time_list.append(current_time)
 
-                # Calculate total hours
+                # Calculate total worked hours
                 total_seconds = 0
                 for i in range(0, len(time_list) - 1, 2):
                     try:
                         t1 = datetime.strptime(time_list[i], "%H:%M:%S")
-                        t2 = datetime.strptime(time_list[i + 1], "%H:%M:%S")
+                        t2 = datetime.strptime(time_list[i+1], "%H:%M:%S")
                         total_seconds += (t2 - t1).seconds
                     except Exception as e:
                         print(f"[WARN] Incomplete pair found: {e}")
@@ -129,24 +121,24 @@ def upload_attendance():
                     SET login_logout = ?, total_hours = ?
                     WHERE name = ? AND day = ?
                 ''', (updated_login_logout, total_hours, name, date))
-                print(f"[DEBUG] Updated attendance for {name} on {date}: {updated_login_logout}, {total_hours}")
             else:
-                # First entry of the day
+                # First-time entry
                 cursor.execute('''
                     INSERT INTO attendance (name, day, login_logout, total_hours)
                     VALUES (?, ?, ?, ?)
                 ''', (name, date, current_time, "00:00:00"))
-                print(f"[DEBUG] Inserted new attendance for {name} on {date}: {current_time}")
 
             conn.commit()
-            print("[DEBUG] DB changes committed")
 
+        print(f"[INFO] Attendance updated for {name} on {date}")
         return jsonify({'status': 'success'}), 200
 
     except Exception as e:
         print(f"[ERROR] Upload failed: {e}")
         return jsonify({'error': str(e)}), 500
 
+# ✅ Start the app
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
+
