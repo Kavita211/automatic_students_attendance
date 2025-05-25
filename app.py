@@ -51,14 +51,15 @@ def fetch_attendance():
                 formatted_records.append((i, name, day, "No Record", "00:00:00"))
             else:
                 time_list = log_times.split(", ")
-                login_time = time_list[0]
-                logout_time = time_list[-1]
+                login_time = time_list[0].replace("Login:", "").replace("Logout:", "").strip()
+                logout_time = time_list[-1].replace("Login:", "").replace("Logout:", "").strip()
                 formatted_records.append((i, name, day, f"{login_time} - {logout_time}", total_hours))
         return formatted_records
 
     except Exception as e:
         print(f"[ERROR] Failed to fetch attendance: {e}")
         return []
+
 
 # 🌐 Homepage - Show attendance
 @app.route('/')
