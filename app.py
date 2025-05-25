@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
-# ✅ Database and backup paths
+# ✅ Fixed database path
 DB_PATH = "/home/pi/attendance_system/attendance.db"
 BACKUP_PATH = "/home/pi/attendance_system/attendance_backup"
 os.makedirs(BACKUP_PATH, exist_ok=True)
@@ -14,7 +14,11 @@ print("[INFO] Starting Flask Attendance Server...")
 print(f"[INFO] Database Path: {DB_PATH}")
 print(f"[INFO] Backup Directory: {BACKUP_PATH}")
 
-# ✅ Initialize attendance table
+
+print("[INFO] Starting Flask Attendance Server...")
+print(f"[INFO] Database Path: {DB_PATH}")
+print(f"[INFO] Backup Directory: {BACKUP_PATH}")
+
 def initialize_db():
     try:
         with sqlite3.connect(DB_PATH) as conn:
@@ -36,7 +40,6 @@ def initialize_db():
 
 initialize_db()
 
-# ✅ Fetch and format attendance records
 def fetch_attendance():
     try:
         with sqlite3.connect(DB_PATH) as conn:
@@ -60,20 +63,18 @@ def fetch_attendance():
         print(f"[ERROR] Failed to fetch attendance: {e}")
         return []
 
-# ✅ Disable caching (for live updates)
+# Disable caching on all responses (to ensure fresh data)
 @app.after_request
 def add_header(response):
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     return response
 
-# ✅ Home page route
 @app.route('/')
 def index():
     records = fetch_attendance()
     print(f"[DEBUG] {len(records)} attendance records retrieved.")
     return render_template('attendance.html', attendance=records)
 
-# ✅ API endpoint to upload attendance
 @app.route('/upload', methods=['POST'])
 def upload_attendance():
     try:
@@ -146,7 +147,6 @@ def upload_attendance():
         print(f"[ERROR] Upload failed: {e}")
         return jsonify({'error': str(e)}), 500
 
-# ✅ Run the Flask server
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
