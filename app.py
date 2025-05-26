@@ -2,10 +2,11 @@ from flask import Flask, render_template, request, jsonify, abort
 import sqlite3
 import os
 from datetime import datetime, timedelta
+import requests
 
 app = Flask(__name__)
 
-# 🛠️ Configuration
+# Configuration
 DB_PATH = os.environ.get("DB_PATH", os.path.join(os.getcwd(), "attendance.db"))
 BACKUP_PATH = os.path.join(os.getcwd(), "attendance_backup")
 os.makedirs(BACKUP_PATH, exist_ok=True)
@@ -14,7 +15,7 @@ print("[INFO] Starting Flask Attendance Server...")
 print(f"[INFO] Database Path: {DB_PATH}")
 print(f"[INFO] Backup Directory: {BACKUP_PATH}")
 
-# ✅ Ensure attendance table exists
+# Initialize DB & table
 def initialize_db():
     try:
         with sqlite3.connect(DB_PATH) as conn:
@@ -36,7 +37,7 @@ def initialize_db():
 
 initialize_db()
 
-# 🔎 Fetch attendance records
+# Fetch attendance records for homepage
 def fetch_attendance():
     try:
         with sqlite3.connect(DB_PATH) as conn:
@@ -60,15 +61,14 @@ def fetch_attendance():
         print(f"[ERROR] Failed to fetch attendance: {e}")
         return []
 
-
-# 🌐 Homepage - Show attendance
+# Homepage route
 @app.route('/')
 def index():
     records = fetch_attendance()
     print(f"[DEBUG] {len(records)} attendance records retrieved.")
     return render_template('attendance.html', attendance=records)
 
-# 🔁 Raspberry Pi (or any device) calls this to push data
+# Upload attendance and push to Render
 @app.route('/upload', methods=['POST'])
 def upload_attendance():
     try:
@@ -94,7 +94,7 @@ def upload_attendance():
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
 
-            # Check if record exists
+            # Check if record exists for this user and date
             cursor.execute("SELECT login_logout FROM attendance WHERE name = ? AND day = ?", (name, date))
             result = cursor.fetchone()
 
@@ -123,23 +123,44 @@ def upload_attendance():
                     WHERE name = ? AND day = ?
                 ''', (updated_login_logout, total_hours, name, date))
             else:
-                # First-time entry
+                # First time entry
+                updated_login_logout = current_time
+                total_hours = "00:00:00"
                 cursor.execute('''
                     INSERT INTO attendance (name, day, login_logout, total_hours)
                     VALUES (?, ?, ?, ?)
-                ''', (name, date, current_time, "00:00:00"))
+                ''', (name, date, current_time, total_hours))
 
             conn.commit()
 
-        print(f"[INFO] Attendance updated for {name} on {date}")
+        # Push to Render server
+        data_to_push = {
+            "name": name,
+            "day": date,
+            "login_logout": updated_login_logout,
+            "total_hours": total_hours
+        }
+
+        try:
+            render_response = requests.post(
+                "https://automatic-attendance-17.onrender.com/upload",
+                json=data_to_push,
+                timeout=5
+            )
+            if render_response.status_code == 200:
+                print(f"[INFO] Successfully pushed attendance for {name} to Render.")
+            else:
+                print(f"[WARN] Failed to push attendance for {name} to Render: "
+                      f"{render_response.status_code} - {render_response.text}")
+        except Exception as e:
+            print(f"[ERROR] Exception while pushing attendance to Render: {e}")
+
         return jsonify({'status': 'success'}), 200
 
     except Exception as e:
         print(f"[ERROR] Upload failed: {e}")
         return jsonify({'error': str(e)}), 500
 
-# ✅ Start the app
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
-
