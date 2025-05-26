@@ -1,13 +1,8 @@
-from flask import Flask, render_template, request, jsonify, abort
+from flask import Flask, render_template, request, jsonify, abort 
 import sqlite3
 import os
-import socket
 from datetime import datetime, timedelta
 import requests
-import threading
-import time
-from smbus2 import SMBus
-from RPLCD.i2c import CharLCD
 
 app = Flask(__name__)
 
@@ -16,52 +11,11 @@ DB_PATH = os.environ.get("DB_PATH", os.path.join(os.getcwd(), "attendance.db"))
 BACKUP_PATH = os.path.join(os.getcwd(), "attendance_backup")
 os.makedirs(BACKUP_PATH, exist_ok=True)
 
-# LCD Setup (adjust address if needed)
-lcd = CharLCD('PCF8574', 0x27)
+print("[INFO] Starting Flask Attendance Server...")
+print(f"[INFO] Database Path: {DB_PATH}")
+print(f"[INFO] Backup Directory: {BACKUP_PATH}")
 
-# Function to get the local IP address
-def get_local_ip():
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.settimeout(0)
-        s.connect(("10.255.255.255", 1))
-        IP = s.getsockname()[0]
-    except Exception:
-        IP = "127.0.0.1"
-    finally:
-        s.close()
-    return IP
-
-# Function to scroll long text on LCD
-def scroll_text(text, delay=0.3):
-    lcd.clear()
-    lcd.write_string("Flask Server IP:")
-    time.sleep(2)
-    for i in range(len(text) - 15):
-        lcd.clear()
-        lcd.write_string(text[i:i+16])
-        time.sleep(delay)
-
-# Background thread to update and scroll IP
-def update_lcd_ip():
-    last_ip = ""
-    while True:
-        current_ip = get_local_ip()
-        if current_ip != last_ip:
-            lcd.clear()
-            lcd.write_string("Flask IP:")
-            lcd.crlf()
-            lcd.write_string(current_ip[:16])
-            print(f"[LCD] Updated IP on LCD: {current_ip}")
-            last_ip = current_ip
-        time.sleep(5)
-
-# Start LCD IP update thread
-threading.Thread(target=update_lcd_ip, daemon=True).start()
-
-# Scroll IP on startup once
-scroll_text("Flask Server IP: " + get_local_ip())
-
+# Initialize DB & table
 def initialize_db():
     try:
         with sqlite3.connect(DB_PATH) as conn:
@@ -83,6 +37,7 @@ def initialize_db():
 
 initialize_db()
 
+# Fetch attendance records for homepage
 def fetch_attendance():
     try:
         with sqlite3.connect(DB_PATH) as conn:
@@ -106,16 +61,19 @@ def fetch_attendance():
         print(f"[ERROR] Failed to fetch attendance: {e}")
         return []
 
+# Homepage route
 @app.route('/')
 def index():
     records = fetch_attendance()
     print(f"[DEBUG] {len(records)} attendance records retrieved.")
     return render_template('attendance.html', attendance=records)
 
+# Upload attendance and push to Render
 @app.route('/upload', methods=['POST'])
 def upload_attendance():
     try:
         data = request.get_json(force=True)
+
         if not data:
             abort(400, description="No data provided")
 
@@ -135,6 +93,8 @@ def upload_attendance():
 
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
+
+            # Check if record exists for this user and date
             cursor.execute("SELECT login_logout FROM attendance WHERE name = ? AND day = ?", (name, date))
             result = cursor.fetchone()
 
@@ -143,6 +103,7 @@ def upload_attendance():
                 time_list = previous_times.split(", ") if previous_times.lower() != "no record" else []
                 time_list.append(current_time)
 
+                # Calculate total worked hours
                 total_seconds = 0
                 for i in range(0, len(time_list) - 1, 2):
                     try:
@@ -162,15 +123,17 @@ def upload_attendance():
                     WHERE name = ? AND day = ?
                 ''', (updated_login_logout, total_hours, name, date))
             else:
+                # First time entry
                 updated_login_logout = current_time
                 total_hours = "00:00:00"
                 cursor.execute('''
                     INSERT INTO attendance (name, day, login_logout, total_hours)
                     VALUES (?, ?, ?, ?)
-                ''', (name, date, updated_login_logout, total_hours))
+                ''', (name, date, current_time, total_hours))
 
             conn.commit()
 
+        # Push to Render server
         data_to_push = {
             "name": name,
             "day": date,
