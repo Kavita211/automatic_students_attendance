@@ -5,3 +5,4 @@ face-recognition
 pillow
 sqlite3 
 smbus2
+RPLCD
