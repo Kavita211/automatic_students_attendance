@@ -1,5 +1,3 @@
-# FILE: detect_faces.py
-
 import cv2
 import face_recognition
 import pickle
@@ -79,6 +77,7 @@ attendance_queue = Queue()
 last_seen = {}
 db_path = "/home/pi/attendance_system/attendance.db"
 gc.enable()
+stop_event = threading.Event()
 
 def update_attendance(name):
     attendance_queue.put(name)
@@ -130,7 +129,7 @@ def db_writer():
             if result:
                 logs = result[0].split(", ")
                 login_time = None
-                logout_time = now  # Latest time is treated as logout
+                logout_time = now
                 for entry in logs:
                     if entry.startswith("Login:"):
                         login_time = entry.split("Login: ")[-1]
@@ -140,8 +139,6 @@ def db_writer():
                     login_time = now
 
                 login_logout = f"Login: {login_time}, Logout: {logout_time}"
-
-                # Calculate total duration
                 t1 = datetime.datetime.strptime(login_time, "%H:%M:%S")
                 t2 = datetime.datetime.strptime(logout_time, "%H:%M:%S")
                 total_seconds = (t2 - t1).seconds
@@ -160,7 +157,6 @@ def db_writer():
 
             conn.commit()
 
-            # ✅ Sync this data
             payload = {
                 "name": name,
                 "day": today,
@@ -179,10 +175,9 @@ def db_writer():
     conn.close()
 
 def detect_faces():
-    while True:
+    while not stop_event.is_set():
         ret, frame = video_capture.read()
         if not ret:
-            lcd_display("Camera Error", LCD_LINE_1)
             break
 
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -210,8 +205,8 @@ def detect_faces():
                 if name not in last_seen or now - last_seen[name] > 10:
                     last_seen[name] = now
                     lcd_display(f"Name: {name}", LCD_LINE_1)
-                    lcd_display("Marked ✅", LCD_LINE_2)
-                    print(f"[MATCH] {name}")
+                    lcd_display("Marked ", LCD_LINE_2)
+                    print(f" {name} marked attendance")
                     update_attendance(name)
             else:
                 handle_unknown()
@@ -219,6 +214,10 @@ def detect_faces():
         time.sleep(0.1)
         gc.collect()
         cv2.waitKey(1)
+
+    # ✅ Show completion message once
+    lcd_display("Detection", LCD_LINE_1)
+    lcd_display("Completed", LCD_LINE_2)
 
 # ✅ Start Threads
 db_thread = threading.Thread(target=db_writer)
@@ -231,9 +230,10 @@ try:
     while True:
         time.sleep(1)
 except KeyboardInterrupt:
+    print("[INFO] Stopping system...")
+    stop_event.set()
     attendance_queue.put(None)
+    face_thread.join()
     db_thread.join()
     video_capture.release()
-    lcd_display("System Off", LCD_LINE_1)
-    lcd_display("Goodbye!", LCD_LINE_2)
     print("[INFO] System exited.")
