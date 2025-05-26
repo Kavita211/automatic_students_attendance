@@ -1,5 +1,7 @@
-Flask==2.3.2
-gunicorn==21.2.0
-requests==2.31.0
-python-dotenv==0.21.0
+flask
+opencv-python
+numpy
+face-recognition
+pillow
 smbus2
+RPLCD
