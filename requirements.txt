@@ -1,7 +1,6 @@
 flask
 opencv-python
+face_recognition
 numpy
-face-recognition
 pillow
-smbus2
-RPLCD
+sqlite3  # (skip this if you're using built-in sqlite3)
